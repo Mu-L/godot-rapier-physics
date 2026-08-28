@@ -723,9 +723,15 @@ impl RapierPhysicsServerImpl {
 
     pub(super) fn area_set_collision_layer(&mut self, area: Rid, layer: u32) {
         let physics_data = physics_data();
-        if let Some(area) = physics_data.collision_objects.get_mut(&area) {
-            area.get_mut_base()
-                .set_collision_layer(layer, &mut physics_data.physics_engine);
+        if let Some(area) = physics_data.collision_objects.get_mut(&area)
+            && let Some(area) = area.get_mut_area()
+        {
+            area.set_collision_layer(
+                layer,
+                &mut physics_data.physics_engine,
+                &mut physics_data.spaces,
+                &physics_data.ids,
+            );
         }
     }
 
@@ -739,9 +745,15 @@ impl RapierPhysicsServerImpl {
 
     pub(super) fn area_set_collision_mask(&mut self, area: Rid, mask: u32) {
         let physics_data = physics_data();
-        if let Some(area) = physics_data.collision_objects.get_mut(&area) {
-            area.get_mut_base()
-                .set_collision_mask(mask, &mut physics_data.physics_engine);
+        if let Some(area) = physics_data.collision_objects.get_mut(&area)
+            && let Some(area) = area.get_mut_area()
+        {
+            area.set_collision_mask(
+                mask,
+                &mut physics_data.physics_engine,
+                &mut physics_data.spaces,
+                &physics_data.ids,
+            );
         }
     }
 
@@ -1003,6 +1015,15 @@ impl RapierPhysicsServerImpl {
                 margin,
                 direction,
             );
+            // One-way filtering is per shape, which a compound collider cannot express, so
+            // gaining or losing it can change which layout the shapes belong in.
+            if body.get_base().compound_collider != body.get_base().wants_compound_collider() {
+                body.recreate_shapes(
+                    &mut physics_data.physics_engine,
+                    &mut physics_data.spaces,
+                    &physics_data.ids,
+                );
+            }
         }
     }
 
