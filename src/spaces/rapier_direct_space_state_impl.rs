@@ -160,16 +160,19 @@ impl RapierDirectSpaceStateImpl {
                 if let Some(object) = try_node_from_instance_id(instance_id) {
                     unsafe { result.set_collider(object) }
                 }
-                // A compound collider names its whole object as shape 0; the ray's feature id
-                // carries which part was actually hit.
-                if collision_object_2d.get_base().compound_collider
-                    && let rapier::geometry::FeatureId::Face(part_index) = hit_info.feature
-                    && let Some(hit_shape) = collision_object_2d
-                        .get_base()
-                        .shape_index_for_compound_part(part_index)
-                {
-                    result.shape = hit_shape as i32;
-                }
+                // TODO: re-enable together with the parry branch (see the TODO in
+                // src/rapier_wrapper/collider.rs). A compound collider names its whole object as
+                // shape 0, and only the patched parry rewrites the ray's feature id to the part
+                // that was hit. Released parry leaves the part's own face index there, so this
+                // would map an unrelated face onto a real shape index and report the wrong shape.
+                // if collision_object_2d.get_base().compound_collider
+                //     && let rapier::geometry::FeatureId::Face(part_index) = hit_info.feature
+                //     && let Some(hit_shape) = collision_object_2d
+                //         .get_base()
+                //         .shape_index_for_compound_part(part_index)
+                // {
+                //     result.shape = hit_shape as i32;
+                // }
             }
             #[cfg(feature = "dim3")]
             match hit_info.feature {

@@ -249,6 +249,10 @@ impl RapierCollisionObjectBase {
 
     /// The shape index behind a compound part, inverting the enabled-shapes-in-order mapping
     /// [`Self::compound_parts`] builds the compound with.
+    // Its only caller is the ray path in rapier_direct_space_state_impl.rs, disabled until the
+    // parry branch lands. `expect` rather than `allow` so re-enabling that caller fails the build
+    // here and this attribute gets removed with it.
+    #[expect(dead_code)]
     pub(crate) fn shape_index_for_compound_part(&self, part_index: u32) -> Option<usize> {
         self.state
             .shapes
