@@ -248,6 +248,60 @@ fn shape_is_halfspace(shape: &SharedShape) -> bool {
     }
     shape.shape_type() == ShapeType::HalfSpace
 }
+/// Whether a shape can sit directly inside a compound.
+///
+/// `Compound::new` panics on a composite part rather than reporting an error, and a panic there
+/// takes the whole extension down, so this is asked rather than assumed. A half-space is refused on
+/// top of that: it is legal as a part, but its AABB spans the whole space, which would leave the
+/// compound's bounding volume infinite and useless to the broad phase.
+fn can_be_compound_part(shape: &SharedShape) -> bool {
+    shape.as_composite_shape().is_none() && !shape_is_halfspace(shape)
+}
+
+/// [`can_be_compound_part`] by handle, for deciding whether an object's shapes belong in one
+/// compound before any of them are built.
+///
+/// A shape that is not registered is not disqualifying on its own: the build refuses it later and
+/// the object falls back to one collider per shape.
+pub fn shape_can_be_compound_part(engine: &PhysicsEngine, shape_handle: ShapeHandle) -> bool {
+    engine
+        .get_shape(shape_handle)
+        .is_none_or(can_be_compound_part)
+}
+
+/// A built compound, and which of the shapes it was built from each of its parts came from.
+///
+/// Not one part per shape: a shape that is flattened in contributes several, so the query paths
+/// need this to name the shape a part belongs to.
+pub struct CompoundShape {
+    pub shape: SharedShape,
+    /// For each part of the compound, its index into the `parts` the compound was built from.
+    pub part_sources: Vec<usize>,
+}
+
+/// The parts `shape` contributes to a compound placed at `transform`, or `None` if it cannot be a
+/// part of one at all.
+///
+/// A 2D skew is applied by decomposing the shape into convex pieces, which comes back as a compound
+/// of its own. Nesting one compound inside another is rejected outright, so those pieces are
+/// spliced in as parts in their own right -- which keeps the object on a single compound, and the
+/// internal edge fix covering it.
+fn shape_as_compound_parts(
+    transform: Pose,
+    shape: SharedShape,
+) -> Option<Vec<(Pose, SharedShape)>> {
+    match shape.as_compound() {
+        Some(compound) => compound
+            .shapes()
+            .iter()
+            .map(|(part_transform, part)| {
+                can_be_compound_part(part).then(|| (transform * part_transform, part.clone()))
+            })
+            .collect(),
+        None => can_be_compound_part(&shape).then(|| vec![(transform, shape)]),
+    }
+}
+
 impl PhysicsEngine {
     pub fn collider_set_modify_contacts_enabled(
         &mut self,
@@ -382,29 +436,37 @@ impl PhysicsEngine {
         }
     }
 
-    /// Builds a compound from a collision object's shapes, cuts between the parts marked as
-    /// interior so nothing collides with them.
+    /// One compound holding a collision object's shapes, with the seams between them cut so nothing
+    /// collides with the object's interior.
     ///
     /// Godot decomposes a concave polygon into convex pieces and hands them over one shape at a
     /// time. Kept as separate colliders they have no idea they are neighbours, and the cuts
     /// between them collide like real surfaces.
-    fn build_compound_shape(&self, parts: &[ShapeInfo]) -> Option<SharedShape> {
+    ///
+    /// `None` means these shapes cannot share a compound -- one of them is not registered, or one
+    /// cannot be a compound part -- and the object has to stay on one collider per shape instead.
+    /// [`RapierCollisionObjectBase::wants_compound_collider`] keeps the known cases from getting
+    /// this far, so reaching `None` here is the safety net rather than the usual route.
+    pub(crate) fn try_build_compound_shape(&self, parts: &[ShapeInfo]) -> Option<CompoundShape> {
         let mut compound_parts = Vec::with_capacity(parts.len());
-        for part in parts {
-            let shape = self.get_shape(part.handle)?;
-            compound_parts.push((part.transform, scale_shape(shape, *part)));
+        let mut part_sources = Vec::with_capacity(parts.len());
+        for (source, part) in parts.iter().enumerate() {
+            let shape = scale_shape(self.get_shape(part.handle)?, *part);
+            let flattened = shape_as_compound_parts(part.transform, shape)?;
+            part_sources.extend(std::iter::repeat_n(source, flattened.len()));
+            compound_parts.extend(flattened);
         }
 
         if compound_parts.is_empty() {
             return None;
         }
 
-        let compound = rapier::parry::shape::Compound::new(compound_parts);
-        // TODO: re-enable once the internal edge fix is released in parry. Needs the
-        // `CompoundFlags` API, which only exists in the local parry branch, so the
-        // `[patch.crates-io]` block in Cargo.toml has to come back with it.
-        // compound.set_flags(rapier::parry::shape::CompoundFlags::FIX_INTERNAL_EDGES);
-        Some(SharedShape::new(compound))
+        let mut compound = rapier::parry::shape::Compound::new(compound_parts);
+        compound.set_flags(rapier::parry::shape::CompoundFlags::FIX_INTERNAL_EDGES);
+        Some(CompoundShape {
+            shape: SharedShape::new(compound),
+            part_sources,
+        })
     }
 
     pub fn collider_create_solid_compound(
@@ -414,12 +476,12 @@ impl PhysicsEngine {
         mat: &Material,
         body_handle: RigidBodyHandle,
         user_data: &UserData,
-    ) -> ColliderHandle {
-        let Some(shape) = self.build_compound_shape(parts) else {
-            return ColliderHandle::invalid();
+    ) -> (ColliderHandle, Vec<usize>) {
+        let Some(built) = self.try_build_compound_shape(parts) else {
+            return (ColliderHandle::invalid(), Vec::new());
         };
 
-        let mut collider = ColliderBuilder::new(shape)
+        let mut collider = ColliderBuilder::new(built.shape)
             .contact_force_event_threshold(-Real::MAX)
             .density(0.0)
             .build();
@@ -441,9 +503,12 @@ impl PhysicsEngine {
         collider.user_data = user_data.get_data();
 
         if let Some(physics_world) = self.get_mut_world(world_handle) {
-            return physics_world.insert_collider(collider, body_handle);
+            return (
+                physics_world.insert_collider(collider, body_handle),
+                built.part_sources,
+            );
         }
-        ColliderHandle::invalid()
+        (ColliderHandle::invalid(), Vec::new())
     }
 
     /// Replaces an existing compound collider's shape with one rebuilt from `parts`, keeping the
@@ -453,10 +518,11 @@ impl PhysicsEngine {
         world_handle: WorldHandle,
         collider_handle: ColliderHandle,
         parts: &[ShapeInfo],
-    ) {
-        let Some(shape) = self.build_compound_shape(parts) else {
-            return;
+    ) -> Vec<usize> {
+        let Some(built) = self.try_build_compound_shape(parts) else {
+            return Vec::new();
         };
+        let shape = built.shape;
         if let Some(physics_world) = self.get_mut_world(world_handle)
             && let Some(collider) = physics_world
                 .physics_objects
@@ -465,6 +531,7 @@ impl PhysicsEngine {
         {
             collider.set_shape(shape);
         }
+        built.part_sources
     }
 
     pub fn collider_create_sensor(
