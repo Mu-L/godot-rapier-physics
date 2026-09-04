@@ -142,6 +142,14 @@ In order to build it as a module, go to:
 - [Godot Rapier Physics Module 2D](https://github.com/appsinacup/godot-rapier-physics-module-2d)
 - [Godot Rapier Physics Module 3D](https://github.com/appsinacup/godot-rapier-physics-module-3d)
 
+# Balaur Engine
+
+The authors of this addon are also building [**Balaur**](https://balaurengine.org): a node-based 2D and 3D game engine written in Rust, together with Sébastien Crozet, the author of [Rapier](https://rapier.rs).
+
+Rapier is its physics too, stepped on a fixed 60 Hz tick, but the determinism covers the whole engine rather than just the physics server: same inputs, same bits on every platform, with a digest per tick, record and replay, and rollback. Scripts are written in [Rune](https://rune-rs.github.io) and hot reload in milliseconds with the state intact.
+
+It is at `0.1` and builds from source for now. Godot Rapier Physics is a separate project and is still maintained.
+
 ## Star History
 
 [![Star History Chart](https://star-history.dera.page/svg?repos=appsinacup/godot-rapier-physics&type=date&legend=top-left)](https://star-history.dera.page/#appsinacup/godot-rapier-physics&type=date&legend=top-left)
