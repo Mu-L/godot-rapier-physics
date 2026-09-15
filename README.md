@@ -152,4 +152,12 @@ It is at `0.1` and builds from source for now. Godot Rapier Physics is a separat
 
 ## Star History
 
-[![Star History Chart](https://star-history.dera.page/svg?repos=appsinacup/godot-rapier-physics&type=date&legend=top-left)](https://star-history.dera.page/#appsinacup/godot-rapier-physics&type=date&legend=top-left)
+## Star History
+
+<a href="https://www.star-history.com/?repos=appsinacup%2Fgodot-rapier-physics&type=timeline&logscale=&legend=bottom-right">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=appsinacup/godot-rapier-physics&type=timeline&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=appsinacup/godot-rapier-physics&type=timeline&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=appsinacup/godot-rapier-physics&type=timeline&legend=bottom-right" />
+ </picture>
+</a>
